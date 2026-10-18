@@ -344,6 +344,11 @@ def _config_disable_reasons(cfg, hf_config) -> list[str]:
             "needs the MXFP4 experts in aiter's gate / up interleaved layout, not "
             "AITER_FORCE_A8W4"
         )
+    if get_bool_env_var("SGLANG_HIP_DSV41_INDEX_K_PAGE8"):
+        reasons.append(
+            "K2i reads the ratio-1 index keys in 64-row pages, not "
+            "SGLANG_HIP_DSV41_INDEX_K_PAGE8's 8-row layout"
+        )
     if importlib.util.find_spec("flydsl") is None:
         reasons.append("needs FlyDSL")
     return reasons
@@ -779,6 +784,9 @@ def _index_plane(*, L, M: int, meta, raw_idx) -> tuple:
         reasons.append("the index keys are not in the split FP4 plane")
     if pool.get_index_k_page_size(L.ratio) != PLANE_ROWS:
         reasons.append(f"index pages of {pool.get_index_k_page_size(L.ratio)} rows")
+    page8 = getattr(pool, "low_ratio_index_k_page8", None)
+    if page8 is not None and page8(L.i):
+        reasons.append("the index keys are in 8-row pages inside each page")
     if meta.compressed_page_size != PLANE_ROWS or meta.page_table.shape[0] != M:
         reasons.append(
             f"an index page table of {tuple(meta.page_table.shape)} at "
