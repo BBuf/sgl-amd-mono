@@ -5,6 +5,7 @@ region; a build without the region records nothing. Adapted from ROCm/ATOM
 (atom/mono/device/stamps.py), which keeps the row in LDS until the launch ends;
 here each mark is a global store, a small skew on the waits that follow it."""
 
+import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr
@@ -12,7 +13,6 @@ from flydsl.expr.typing import as_ir_value
 
 from sgl_amd_mono.common.epoch import _gptr
 from sgl_amd_mono.common.guard import clock
-from sgl_amd_mono.common.ops import traced
 
 TL_POINTS = 48  # marks a CTA row: K2's attention 0 .., its FFN 16 .., K1's 32 ..
 
@@ -22,7 +22,7 @@ def timeline_row(scratch, offset: int, bid):
     return scratch + fx.Int64(offset) + fx.Int64(bid) * fx.Int64(TL_POINTS * 8)
 
 
-@traced
+@flyc.jit
 def stamp(c, point: int):
     """Mark ``point`` on this CTA's row (``c["tl"]``), if the build has one."""
     if const_expr(c.get("tl") is not None):  # noqa: SIM102
