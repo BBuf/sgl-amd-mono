@@ -1,0 +1,53 @@
+name: Unit tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    # test/unit is CPU only: the specs, and test_contract.py, which checks every
+    # name the plugin reads off SGLang against the SGLang it runs with. That
+    # check is only as good as the SGLang below -- against the wrong one it
+    # either misses a break or fails on every PR.
+    #
+    # SGLANG_REF is the one thing to decide here: the monokernel interface
+    # (sglang.srt.monokernels) is on main, so main is what this tracks. Pin a
+    # tag instead once a release carries it.
+    runs-on: ubuntu-latest
+    env:
+      SGLANG_REF: main
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install CPU torch
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install SGLang (${{ env.SGLANG_REF }})
+        run: |
+          pip install --no-deps \
+            "sglang @ git+https://github.com/sgl-project/sglang@${SGLANG_REF}#subdirectory=python"
+          pip install msgspec pytest
+
+      - name: Install this plugin
+        run: pip install -e . --no-deps
+
+      - name: Run the CPU tests
+        # test/kernels and test/e2e need gfx950 GPUs and are not run here.
+        run: pytest test/unit -q
