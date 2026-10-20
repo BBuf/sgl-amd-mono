@@ -343,9 +343,14 @@ def _covered_layers(config) -> list[int]:
 def _config_disable_reasons(cfg, hf_config) -> list[str]:
     """What ``SPEC.requires`` cannot state: a value SGLang's attention gate must not
     take, aiter's own flag, and FlyDSL."""
-    from sglang.kernels.ops.attention.dsv4.unified_kv_kernels.env_gate import (
-        is_unified_kv_triton,
-    )
+    try:  # its home since SGLang's kernel regroup (sgl-project/sglang#45112)
+        from sglang.srt.layers.attention.dsv4.unified_kv_gate import (
+            is_unified_kv_triton,
+        )
+    except ImportError:
+        from sglang.kernels.ops.attention.dsv4.unified_kv_kernels.env_gate import (
+            is_unified_kv_triton,
+        )
     from sglang.srt.utils import get_bool_env_var
 
     reasons = []
