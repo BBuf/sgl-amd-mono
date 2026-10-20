@@ -48,7 +48,6 @@ from sgl_amd_mono.common.ops import (
     mfma_bf16,
     row_sum,
     rsrc,
-    traced,
     uniform,
 )
 from sgl_amd_mono.common.plan import (
@@ -237,7 +236,7 @@ def gemv_loads(c, rg, chunks):
     return out
 
 
-@traced
+@flyc.jit
 def load_x(c):
     """Every slice's x ready -> the bf16 x rows into LDS (rows padded)."""
     s, tid = c["S"], c["tid"]
@@ -260,7 +259,7 @@ def load_x(c):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def stage_gemv(c, rg, ops):
     """Rows 16 rg .. of in_proj against the LDS x -> bf16 PROJ (and proj_dbg)."""
     s, tid, lane, wave, red = c["S"], c["tid"], c["lane"], c["wave"], c["red"]
@@ -350,7 +349,7 @@ def kda_stage(c, req, h, ch):
     return k
 
 
-@traced
+@flyc.jit
 def kda_conv(c, k, req, h, ch):
     """Owned channels: the spec conv update of request ``req``'s L tokens -> new
     conv state; q / k out through QK, v to LDS."""
@@ -398,7 +397,7 @@ def kda_conv(c, k, req, h, ch):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def kda_gates(c, k, req, h):
     """f_a, beta and the head's q / k (one poll batch a thread); g1 = f_b f_a by
     MFMA (a wave 16 rows) -> lower-bound gate -> decay in LDS; q / k l2-normed
@@ -458,7 +457,7 @@ def kda_gates(c, k, req, h):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def kda_recur(c, k, req, h, ch):
     """State rows 16 ch .. of head h: the recurrence over the L tokens, a state
     written a token, bf16 outputs to LDS ``ol`` and their partial norms (ONRM)."""
@@ -499,7 +498,7 @@ def kda_recur(c, k, req, h, ch):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def kda_norm(c, req, h, ch):
     """Rows 16 ch ..: gated RMSNorm over the head's 128 (every chunk's partial)
     -> core_out."""
@@ -527,7 +526,7 @@ def kda_norm(c, req, h, ch):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def kda_tasks(c, on, tls):
     s, L, tid, bid = c["S"], c["L"], c["tid"], c["bid"]
     for task in range(first_task(bid, c["kda0"]), (s // L) * NH * NVCH, BLOCKS):

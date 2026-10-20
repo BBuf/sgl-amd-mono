@@ -10,6 +10,7 @@ neither, which is why it lives here.
 A stage reads its state from the ``c`` dict its launch built.
 """
 
+import flydsl.compiler as flyc
 import flydsl.expr as fx
 from aiter.ops.flydsl.kernels import buffer_ops as bo
 from flydsl.expr import const_expr, gpu, range_constexpr
@@ -23,7 +24,6 @@ from sgl_amd_mono.common.ops import (
     hw_exp2,
     hw_rsq,
     rsrc,
-    traced,
     wave_max,
 )
 from sgl_amd_mono.common.plan import THREADS
@@ -64,7 +64,7 @@ def sum_polled(vals):
 
 
 # ---------------------------------------------------------------- attn CTAs
-@traced
+@flyc.jit
 def stage_slice(c, task):
     """Columns 128 task ..: every token's sources into LDS ``vals`` (4 columns a
     thread), the prefix (+ delta) rounded to bf16 and stored back, per-(token,
@@ -140,7 +140,7 @@ def stage_slice(c, task):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def stage_gate(c, t):
     """Token t: the 56 slices' partials -> source weights e_s and their sum."""
     s, ns, tid, lane, wave, red = (
@@ -183,7 +183,7 @@ def stage_gate(c, t):
 GATE_OFF = 512  # red words of stage_gate_local's group sums
 
 
-@traced
+@flyc.jit
 def stage_gate_local(c):
     """Every token's source weights computed in this CTA (``stage_gate``'s sums
     in its order, so every CTA's are bit-identical): the 56 slices' partials
@@ -240,7 +240,7 @@ def stage_gate_local(c):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def stage_mix(c, task):
     """Columns 128 task ..: the softmax mix of ``vals`` (4 columns a thread), its
     sum of squares (MSQ), every slice's -> rstd, then bf16 x = mixed rstd w ->

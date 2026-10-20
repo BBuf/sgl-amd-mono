@@ -158,10 +158,6 @@ def wave_sum(v):
     return butterfly(v, (32, 16, 8, 4, 2, 1))
 
 
-def wave_max(v):
-    return butterfly(v, (32, 16, 8, 4, 2, 1), fx.max)
-
-
 def _xpartner(v, off, lane):
     """Lane ``lane ^ off``'s v: DPP within a row, v_permlane*_swap across rows
     (``xshfl`` takes ``shuffle_xor`` there)."""
@@ -181,7 +177,7 @@ def wave_incl_scan(v, lane):
     return v
 
 
-@traced
+@flyc.jit
 def block_excl_scan(v, lane, wave, buf):
     """(exclusive prefix of v over the CTA in thread order, CTA total); ``buf``
     needs WAVES words."""

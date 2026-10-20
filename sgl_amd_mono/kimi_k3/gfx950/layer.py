@@ -30,7 +30,6 @@ from sgl_amd_mono.common.ops import (
     ld_i32,
     load_ptr64,
     peer_bases,
-    traced,
     uniform,
 )
 from sgl_amd_mono.common.plan import (
@@ -158,7 +157,7 @@ def scratch_bytes(key: K2Build) -> int:
     return max(o + n for o, n in scratch_layout(key).values())
 
 
-@traced
+@flyc.jit
 def stage_oproj(c, gi):
     """o_proj tasks gi, gi + 200, gi + 400 (< 448): every task's weights in
     flight at once (one memory latency, not three), then the MFMAs."""

@@ -9,6 +9,7 @@ group g = lane / 16), and the token rows are read at the same K. The K order
 inside a chunk is a permutation both operands share, so the dot is unchanged.
 """
 
+import flydsl.compiler as flyc
 import flydsl.expr as fx
 from aiter.ops.flydsl.kernels import buffer_ops as bo
 from flydsl.expr import gpu, range_constexpr
@@ -19,7 +20,6 @@ from sgl_amd_mono.common.ops import (
     CM_NT,
     mfma_bf16,
     rsrc,
-    traced,
 )
 from sgl_amd_mono.common.plan import THREADS, WAVES
 
@@ -97,7 +97,7 @@ def const_live(per, n):
     return per * WAVES != n
 
 
-@traced
+@flyc.jit
 def rows_to_lds(tid, src, k, s, xl, xrow, cm=0, ldk=None, k0=0):
     """Columns k0 .. k0 + k of token rows 0 .. s - 1 of the bf16 [s, ldk] at
     ``src`` -> LDS (``xrow`` a row), 16 B a lane."""

@@ -37,7 +37,6 @@ from sgl_amd_mono.common.ops import (
     row_sum,
     rsrc,
     sum_partials,
-    traced,
     uniform,
 )
 from sgl_amd_mono.common.plan import (
@@ -166,7 +165,7 @@ def o_loads(c, rg):
     return out
 
 
-@traced
+@flyc.jit
 def load_core(c):
     """The core rows (S x 1536 bf16) -> LDS, rows padded."""
     s, tid = c["S"], c["tid"]
@@ -184,7 +183,7 @@ def load_core(c):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def stage_o(c, rg, ops):
     """Rows 16 rg ..: GEMV -> bf16 partials -> every rank's AR region, this
     rank's slot (thread: token, row pair; a put a peer)."""
@@ -223,7 +222,7 @@ def stage_o(c, rg, ops):
     gpu.barrier()
 
 
-@traced
+@flyc.jit
 def stage_reduce(c, task):
     """Columns 128 task ..: the 8 ranks' partials, rank order, -> bf16 delta in
     LDS (thread: token, column pair)."""
