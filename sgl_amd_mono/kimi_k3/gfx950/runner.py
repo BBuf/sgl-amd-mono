@@ -25,16 +25,19 @@ class K3MonoRunner:
     """
 
     def __init__(self, tp: int, rank: int, group, device) -> None:
-        from sgl_amd_mono.kimi_k3.gfx950 import layer
+        from sgl_amd_mono.kimi_k3.gfx950 import k1, layer
         from sgl_amd_mono.kimi_k3.gfx950.stages import moe
 
         self.tp, self.rank, self.device = tp, rank, device
         # tests only: the wait to stall and how many launches to let
         # through first, compiled into this rank's build key
         self.fault_site, self.fault_after = guard.fault_injection(rank) or (0, 0)
+        # The launches run one after another, so one buffer the widest of them
+        # fits. K1 is the widest.
         n = max(
             moe.scratch_bytes(moe.MoeBuild(tokens=MAX_ROWS)),
             layer.scratch_bytes(layer.K2Build(tokens=MAX_ROWS, nblocks=MAX_BLOCKS)),
+            k1.scratch_bytes(MAX_ROWS),
         )
         self.scratch_bytes = (n + 255) // 256 * 256
         self.scratch = torch.zeros(self.scratch_bytes, dtype=torch.uint8, device=device)

@@ -264,6 +264,7 @@ def _build(model, hf_config, ctx):
     """Pack every covered layer and compile the widths, before graph capture."""
     from sglang.srt.runtime_context import get_parallel
 
+    from sgl_amd_mono.kimi_k3.gfx950 import k1 as k1_mod
     from sgl_amd_mono.kimi_k3.gfx950.runner import K3MonoRunner
 
     backbone = _backbone(model)
@@ -272,7 +273,7 @@ def _build(model, hf_config, ctx):
     # the peer handshake is collective: every rank reaches it here
     runner = K3MonoRunner(p.tp_size, p.tp_rank, p.tp_group.cpu_group, device)
     runner.set_deadline(ctx.deadline_s)
-    layers = {}
+    layers, batches = {}, {}
     for rows in ctx.widths:
         for i in _covered_layers(hf_config):
             packed = _weights(backbone.layers[i], i, rows, runner)
@@ -284,25 +285,40 @@ def _build(model, hf_config, ctx):
         # on this layer's real weights and throwaway activations. Every rank
         # runs the same launches in the same order, so the peer waits pair up
         # exactly as they do on a served step.
+        #
+        # K1's conv rows come from its batch, so that is built first.
+        batches[rows] = k1_mod.build_batch(layers[rows], device)
         _warmup(runner, layers[rows], rows)
-    return _Built(model, runner, layers)
+    return _Built(model, runner, layers, batches)
 
 
 def _warmup(runner, packed_layers: dict, rows: int) -> None:
     """Launch every layer once at this width, before any graph capture."""
+    from sgl_amd_mono.kimi_k3.gfx950 import k1 as k1_mod
     from sgl_amd_mono.kimi_k3.gfx950.stages.dims import HIDDEN
 
     device = runner.device
     core = torch.zeros(rows, CORE, dtype=torch.bfloat16, device=device)
     out = torch.empty(rows, HIDDEN, dtype=torch.bfloat16, device=device)
     banks: dict[int, torch.Tensor] = {}
-    for packed in packed_layers.values():
-        nb = packed.key.nblocks
+
+    def bank(nb: int):
         if nb not in banks:
             banks[nb] = torch.zeros(
                 rows, nb, HIDDEN, dtype=torch.bfloat16, device=device
             )
-        _k2_launch(runner, packed, core, runner.prefix[:rows], banks[nb], out)
+        return banks[nb]
+
+    for packed in packed_layers.values():
+        # K1 first: on a served step it runs before this layer's K2, so the
+        # waits pair up in the same order here as there.
+        if packed.k1 is not None:
+            k1_mod.warmup(
+                runner, packed.k1, runner.prefix[:rows], bank(packed.k1.key.nblocks)
+            )
+        _k2_launch(
+            runner, packed, core, runner.prefix[:rows], bank(packed.key.nblocks), out
+        )
     torch.cuda.synchronize()
 
 
@@ -372,11 +388,14 @@ SPEC = MonoSpec(
 
 
 class _Layer(msgspec.Struct):
-    """One layer's launch: its build key and the weights it reads in place."""
+    """One layer's launches: their build keys and the weights they read in
+    place. ``k1`` is None on the full-attention layers, which keep SGLang's
+    attention and enter at ``forward_gated_core``."""
 
     i: int
     key: Any
     module: Any  # the KimiK3DecoderLayer, for the tensors read per step
+    k1: Any = None  # the KDA front launch (gfx950/k1.py), where it applies
 
 
 def _k2_blocks(layer) -> int:
@@ -389,10 +408,12 @@ def _k2_blocks(layer) -> int:
 def _weights(layer, i: int, rows: int, runner) -> _Layer:
     """This layer's build key at one launch width. The weights themselves are
     read in place at launch, so nothing is packed or copied here."""
+    from sgl_amd_mono.kimi_k3.gfx950 import k1 as k1_mod
     from sgl_amd_mono.kimi_k3.gfx950.layer import K2Build
 
     moe = layer.mlp
     return _Layer(
+        k1=k1_mod.build(layer, i, rows),
         i=i,
         key=K2Build(
             tokens=rows,
@@ -550,13 +571,19 @@ class _LanguageModelShim:
 class _Built:
     """One rank's monokernels: the runner, each layer's weights, and the forward."""
 
-    def __init__(self, model, runner, by_width: dict) -> None:
+    def __init__(self, model, runner, by_width: dict, k1_by_width: dict) -> None:
         self.model = model
         self.lm = getattr(model, "language_model", model)
         self.backbone = self.lm.model
         # {launch width: {layer id: its packed launch}}; a layer's build
         # key carries the width, so each width has its own compiled kernel
         self.runner, self._by_width = runner, by_width
+        # {launch width: that width's K1 layers as one batch}, None where K1
+        # took no layer
+        self._k1_by_width = k1_by_width
+        # This step's shared K1 state and the layers that took it, set by
+        # _backbone before the first layer and read by _core and finish().
+        self._k1_state, self._k1_engaged = None, []
         self._shim = _LanguageModelShim(self)
 
     def forward(self, plan, input_ids, positions, forward_batch, *args, **kwargs):
@@ -592,8 +619,16 @@ class _Built:
         from sglang.srt.models.kimi_k3 import AuxHiddenStateList, _cdiv
         from sglang.srt.utils.common import BumpAllocator
 
+        from sgl_amd_mono.kimi_k3.gfx950 import k1 as k1_mod
+
         m = self.backbone
         self.runner.step_begin()
+        # Once a step, before the first layer: every K1 layer's conv window
+        # staged in one write. _k1_engaged collects the layers that take it,
+        # which is what finish() hands back for.
+        k1_batch = self._k1_by_width[self._plan.key.rows]
+        self._k1_state = k1_mod.prepare(k1_batch, forward_batch)
+        self._k1_engaged = []
         hidden = m.embed_tokens(input_ids) if input_embeds is None else input_embeds
         start(forward_batch)
         zero_allocator = BumpAllocator(
@@ -610,6 +645,9 @@ class _Built:
             hidden = self._layer(i, hidden, forward_batch, zero_allocator)
             if i in captures:
                 aux.append(m._dspark_capture_stream(i, hidden, forward_batch))
+        # Once a step, after the last layer: the conv inputs handed back to
+        # SGLang's speculative window, which only reads them at accept.
+        k1_mod.finish(k1_batch, self._k1_state, self._k1_engaged)
         hidden = final_norm(
             hidden, forward_batch, m._final_read, capture=None, skip_empty=True
         )
@@ -632,14 +670,39 @@ class _Built:
                 zero_allocator=zero_allocator,
                 capture_gathered=None,
             )
-        x = layer.attn_boundary.prepare(hidden, forward_batch, capture_gathered=None)
-        core = self._gated_core(layer, x, forward_batch, zero_allocator)
-        out = _launch(
-            self.runner, packed, self.backbone.attn_bank.current, core, forward_batch
-        )
+        bank = self.backbone.attn_bank.current
+        core = self._core(layer, packed, hidden, bank, forward_batch, zero_allocator)
+        out = _launch(self.runner, packed, bank, core, forward_batch)
         # The launch folded the residual in, so the stream is written rather
         # than finished through ffn_boundary.
         return set_written(out, forward_batch)
+
+    def _core(self, layer, packed, hidden, bank, forward_batch, zero_allocator):
+        """This layer's TP-local attention output, which the layer launch takes.
+
+        A KDA layer takes the K1 launch where it is covered: K1 runs the
+        attention-side seam, ``input_layernorm`` and the whole KDA attention in
+        one launch, so it replaces both the boundary's prepare and the model's
+        attention. K1 reads the residual stream and does not add to it -- the
+        attention's contribution is added at the MLP seam, which is K2's -- so
+        the stream is handed on unchanged, which is what the boundary's prepare
+        would have left for K2's ``written_residual``.
+
+        Everything else -- the full-attention layers, and a KDA layer K1
+        declines -- keeps SGLang's path. K1 writes nothing before it declines,
+        so that fallback is clean.
+        """
+        from sglang.srt.layers.layer_boundary.residual.batch import set_written
+
+        from sgl_amd_mono.kimi_k3.gfx950 import k1 as k1_mod
+
+        state = self._k1_state
+        if packed.k1 is not None and k1_mod.covered(packed.k1, hidden, bank, state):
+            set_written(hidden, forward_batch)
+            self._k1_engaged.append(packed.i)
+            return k1_mod.launch(self.runner, packed.k1, hidden, bank, state)
+        x = layer.attn_boundary.prepare(hidden, forward_batch, capture_gathered=None)
+        return self._gated_core(layer, x, forward_batch, zero_allocator)
 
     def _gated_core(self, layer, x, forward_batch, zero_allocator):
         """``KimiK3DecoderLayer._run_self_attn`` stopped before o_proj: the
