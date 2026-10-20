@@ -97,6 +97,8 @@ def slice_input(c, task, idx):
     the pair's mean over the R_new streams, as DSpark captures a target layer."""
     s, rl = c["S"], c["rl"]
     a = c["args"]
+    # read before the dynamic branch: a method call on c inside one carries c
+    aux_on = c.get("aux_on")
     c0 = task * COLS
     if idx < s * COLS // 2:
         t = idx // (COLS // 2)
@@ -113,14 +115,13 @@ def slice_input(c, task, idx):
             outs.append(acc)
             means.append(total * fx.Float32(1.0 / HC))
         c["put_bf"](c["lin"], t * HIDDEN + c0 + cc, outs)
-        aux_on = c.get("aux_on")
         if const_expr(aux_on is not None):
             if aux_on:
-                for d in range_constexpr(2):
+                for k in range_constexpr(2):
                     bo.buffer_store(
-                        means[d].to(fx.BFloat16),
+                        means[k].to(fx.BFloat16),
                         rsrc(a["aux_out"]),
-                        t * HIDDEN + c0 + cc + d,
+                        t * HIDDEN + c0 + cc + k,
                     )
 
 
