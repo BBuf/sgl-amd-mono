@@ -121,10 +121,10 @@ SGLANG_READS = {
         "rocm_router_gemv_split_k(x)",
         "rocm_router_gemv_split_k(w)",
     ),
-    "kernels/ops/attention/dsv4/unified_kv_kernels/env_gate.py": (
+    "srt/layers/attention/dsv4/unified_kv_gate.py": (
         "is_unified_kv_triton",
     ),
-    "kernels/ops/layernorm/mhc.py": ("hc_broadcast", "hc_combine"),
+    "kernels/ops/layernorm/mhc.py": ("hc_broadcast", "mhc_combine"),
     "kernels/ops/layernorm/mhc_boundary_hip.py": ("tensors",),
     "srt/arg_groups/fields/*.py": (
         "kv_cache_dtype",
@@ -901,7 +901,12 @@ class _Built:
     def _backbone(self, plan, input_ids, positions, forward_batch, input_embeds):
         """``DeepseekV4Model.forward``: the embedding, each layer as K1 and K2,
         SGLang's Engram writes, then the head's combine and norm."""
-        from sglang.kernels.ops.layernorm.mhc import hc_broadcast, hc_combine
+        from sglang.kernels.ops.layernorm.mhc import hc_broadcast
+
+        try:  # renamed in SGLang's kernel regroup (sgl-project/sglang#45112)
+            from sglang.kernels.ops.layernorm.mhc import mhc_combine as hc_combine
+        except ImportError:
+            from sglang.kernels.ops.layernorm.mhc import hc_combine
 
         m = self.model
         self._warm_normal_moe()
