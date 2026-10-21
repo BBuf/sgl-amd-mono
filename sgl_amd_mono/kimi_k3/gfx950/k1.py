@@ -86,6 +86,7 @@ SGLANG_READS = {
     "srt/layers/attn_residual.py": ("_count_write", "num_valid_blocks"),
     # this layer's weights, read in place at launch
     "srt/models/kimi_k3.py": (
+        "use_full_rank_gate",
         "_qkvgbfa_layer",
         "qkv_conv1d",
         "f_b_proj",
@@ -142,10 +143,21 @@ def _unsupported_reasons(layer) -> list[str]:
     # w_in is the merged [q,k,v,g | f_a | b | pad] buffer. Without the merge
     # there is no single tensor in K1's in-projection layout, and the pieces
     # carry their own quantization scales that a row-cat would drop.
-    if getattr(attn, "_qkvgbfa_layer", None) is None:
+    #
+    # A quantized checkpoint is not a reason on its own. SGLang takes the merge
+    # whenever a monokernel backend is selected, and Kimi-K3's checkpoint
+    # quantizes only its experts. What is left is the gate, the environment
+    # variable, and attention weights the merge may not concatenate.
+    if not getattr(attn, "use_full_rank_gate", False):
         reasons.append(
-            "the KDA in-projection is not merged (SGLANG_ROCM_K3_FUSE_KDA_INPROJ, "
-            "use_full_rank_gate, or a quantized checkpoint)"
+            "the KDA gate is not full-rank, so there is no wide projection to "
+            "extend (linear_attn_config.use_full_rank_gate)"
+        )
+    elif getattr(attn, "_qkvgbfa_layer", None) is None:
+        reasons.append(
+            "the KDA in-projection is not merged "
+            "(SGLANG_ROCM_K3_FUSE_KDA_INPROJ=0, or attention weights this "
+            "merge may not concatenate)"
         )
     conv = getattr(attn, "qkv_conv1d", None)
     if conv is None or conv.weight.dim() != 3 or conv.weight.shape[1] != 1:
