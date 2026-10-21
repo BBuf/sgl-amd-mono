@@ -20,7 +20,7 @@ Both reduces go over a peer buffer. Neither leaves the kernel.
 
 The attention itself stays on SGLang's path. That is where this contract
 differs from DeepSeek-V4.1's: the model runs the attention up to
-``forward_gated_core``, and the launch owns everything after it. The KDA and
+``forward_pre_o_proj``, and the launch owns everything after it. The KDA and
 the full-attention layers reach that point the same way. At TP8 both stop at a
 ``CORE``-wide output. So the launch covers every MoE layer, not one attention
 kind.
@@ -103,7 +103,7 @@ SGLANG_READS = {
     "srt/models/kimi_k3.py": (
         "AuxHiddenStateList",
         "_cdiv",
-        "forward_gated_core",
+        "forward_pre_o_proj",
         "use_latent_moe",
         "routed_expert_norm",
         "routed_expert_up_proj",
@@ -230,7 +230,7 @@ def _model_disable_reasons(model, hf_config, copies: dict) -> list[str]:
             (not layer._sp_moe, "SP-MoE is on"),
             (not layer.all_reduce_fusion, "the fused attention all-reduce is on"),
             (
-                hasattr(attn, "forward_gated_core"),
+                hasattr(attn, "forward_pre_o_proj"),
                 "the attention cannot stop before o_proj",
             ),
             # The MLA cores reach o_proj from several places, so stopping
@@ -390,7 +390,7 @@ SPEC = MonoSpec(
 class _Layer(msgspec.Struct):
     """One layer's launches: their build keys and the weights they read in
     place. ``k1`` is None on the full-attention layers, which keep SGLang's
-    attention and enter at ``forward_gated_core``."""
+    attention and enter at ``forward_pre_o_proj``."""
 
     i: int
     key: Any
@@ -702,9 +702,9 @@ class _Built:
             self._k1_engaged.append(packed.i)
             return k1_mod.launch(self.runner, packed.k1, hidden, bank, state)
         x = layer.attn_boundary.prepare(hidden, forward_batch, capture_gathered=None)
-        return self._gated_core(layer, x, forward_batch, zero_allocator)
+        return self._pre_o_proj(layer, x, forward_batch, zero_allocator)
 
-    def _gated_core(self, layer, x, forward_batch, zero_allocator):
+    def _pre_o_proj(self, layer, x, forward_batch, zero_allocator):
         """``KimiK3DecoderLayer._run_self_attn`` stopped before o_proj: the
         attention's TP-local output, which is where the launch starts."""
         from sglang.srt.layers.layer_boundary import (
@@ -720,7 +720,7 @@ class _Built:
                 AttentionInputs(x, forward_batch, latent)
             )
         try:
-            return attn.forward_gated_core(
+            return attn.forward_pre_o_proj(
                 hidden_states=x,
                 positions=self._positions,
                 forward_batch=forward_batch,

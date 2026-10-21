@@ -5,11 +5,11 @@ seam to the gated core output.
 
 K1 covers the attention-side seam, ``input_layernorm``, the in-projection,
 ``f_b``, the conv, the recurrence and the gated output norm. Its output is what
-``forward_gated_core`` returns, so K1 and the layer launch (K2) chain with no
+``forward_pre_o_proj`` returns, so K1 and the layer launch (K2) chain with no
 glue: K1 produces the core, K2 consumes it.
 
 Only the KDA layers. The full-attention layers keep SGLang's path up to
-``forward_gated_core`` and K2 takes them from there, so the layer launch still
+``forward_pre_o_proj`` and K2 takes them from there, so the layer launch still
 covers every MoE layer.
 
 Two things here are worth knowing before changing any of it.

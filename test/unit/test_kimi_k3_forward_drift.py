@@ -1,7 +1,7 @@
 """The Kimi-K3 forward this plugin reproduces, pinned by source digest.
 
 ``_Built`` replaces the whole model forward for a routed step. So
-``_backbone``, ``_layer`` and ``_gated_core`` are a copy of what SGLang's own
+``_backbone``, ``_layer`` and ``_pre_o_proj`` are a copy of what SGLang's own
 forward does. ``SGLANG_READS`` catches a rename. It cannot catch a changed
 branch. A changed branch here gives wrong tokens on routed steps and right
 tokens everywhere else, which is the hardest kind of bug to find.
@@ -42,7 +42,7 @@ PINNED = {
     ),
     ("KimiK3DecoderLayer", "_run_self_attn"): (
         "cd1034c72d549c2c",
-        "_Built._gated_core",
+        "_Built._pre_o_proj",
     ),
 }
 

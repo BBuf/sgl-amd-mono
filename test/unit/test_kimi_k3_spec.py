@@ -125,7 +125,7 @@ def _fake_layer(*, gate=True, kda=False):
 
     attn = SimpleNamespace(
         o_proj=lin(HF_CONFIG["hidden_size"], 1536),
-        forward_gated_core=lambda **kw: None,
+        forward_pre_o_proj=lambda **kw: None,
     )
     if not kda:  # only the MLA layers carry the gate
         attn.use_output_gate = gate
@@ -164,7 +164,7 @@ def test_a_covered_layer_passes(monkeypatch):
 
 
 def test_an_mla_layer_without_the_output_gate_is_refused(monkeypatch):
-    # hasattr(attn, "forward_gated_core") is true for both attention classes,
+    # hasattr(attn, "forward_pre_o_proj") is true for both attention classes,
     # so it cannot carry this: for MLA the split rides on the gate's wrapper.
     reasons = _reasons(monkeypatch, _fake_layer(gate=False))
     assert any("output gate" in r for r in reasons), reasons
