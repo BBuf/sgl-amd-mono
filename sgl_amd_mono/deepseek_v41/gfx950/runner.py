@@ -263,6 +263,7 @@ class DSV41MonoRunner:
         topk: int = ROUTE_TOPK,
         ug_groups: int = 2,
         swa_width: int = WINDOW,
+        shuffled: bool = False,
     ):
         _ensure_writable_flydsl_cache()
         from sgl_amd_mono.common.peer import PeerBuffer
@@ -271,6 +272,8 @@ class DSV41MonoRunner:
         self.route = dict(
             experts=experts, topk=topk, ug_groups=ug_groups, swa_width=swa_width
         )
+        # K1 / K2 read wqkv, wq_b and wo_b in aiter's (16, 16) preshuffle
+        self.shuffled = shuffled
         self.d = Dims(tp)
         dev = torch.device(device)
         if dev.index is None:
@@ -366,6 +369,7 @@ class DSV41MonoRunner:
                     kt=not index,
                     fold=fold,
                     index=index,
+                    shuffled=self.shuffled,
                     fault_site=self.fault_site,
                     fault_after=self.fault_after,
                     **self.route,
@@ -415,6 +419,7 @@ class DSV41MonoRunner:
                     kt=True,
                     index=index,
                     compressed=compressed,
+                    shuffled=self.shuffled,
                     fault_site=self.fault_site,
                     fault_after=self.fault_after,
                     **self.route,

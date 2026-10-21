@@ -82,6 +82,9 @@ class MonoBuild(msgspec.Struct, frozen=True):
     topk: int = TOPK
     ug_groups: int = 2
     swa_width: int = WINDOW
+    # wqkv, wq_b and wo_b in aiter's (16, 16) preshuffle (SGLang's MXFP8 aiter route
+    # with SGLANG_ROCM_MXFP8_AITER_PRESHUFFLE); wo_a stays row-major
+    shuffled: bool = False
 
 
 ROUTE = ("experts", "topk", "ug_groups", "swa_width")
@@ -95,7 +98,8 @@ def _variant(key: MonoBuild) -> dict:
     """A kernel name's route parameters, where they are not the target's."""
     base = MonoBuild(key.tokens, key.tp)
     short = {"experts": "e", "topk": "k", "ug_groups": "u", "swa_width": "w"}
-    return {short[f]: v for f, v in route_of(key).items() if v != getattr(base, f)}
+    out = {short[f]: v for f, v in route_of(key).items() if v != getattr(base, f)}
+    return {**out, "sh": True} if key.shuffled else out
 
 
 def _moe_key(key: MonoBuild) -> MoeBuild:
@@ -103,12 +107,16 @@ def _moe_key(key: MonoBuild) -> MoeBuild:
 
 
 def _front_key(key: MonoBuild):
-    return mb_front.FrontBuild(key.tokens, key.tp, key.kt, key.swa_width)
+    return mb_front.FrontBuild(
+        key.tokens, key.tp, key.kt, key.swa_width, shuffled=key.shuffled
+    )
 
 
 def _back_key(key: MonoBuild):
     # 0: the window only (compress ratio 0); 1: also top-k compressed rows
-    return mb_back.BackBuild(key.tokens, key.tp, 1 if key.compressed else 0)
+    return mb_back.BackBuild(
+        key.tokens, key.tp, 1 if key.compressed else 0, shuffled=key.shuffled
+    )
 
 
 def scratch_layout(s: int, tp: int, **route) -> dict:

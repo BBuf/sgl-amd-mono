@@ -33,14 +33,24 @@ def _steps(c, nsteps, split, tiled):
     return [(part * per + i, None) for i in range(per)]
 
 
-def _step_load(c, r_w, r_ws, k, row0, st, pred=None):
+def w_offset(row, k, col, shuffled):
+    """Byte offset of the 16 B at (row, col) of an e4m3 [N, k] weight (col % 16 == 0):
+    row-major, or aiter's (16, 16) preshuffle, [N / 16, k / 32, 2, 16 rows, 16 B]."""
+    if const_expr(shuffled):
+        q = col // 16
+        return (row // 16) * (16 * k) + (q // 2) * 512 + (q % 2) * 256 + (row % 16) * 16
+    return row * k + col
+
+
+def _step_load(c, r_w, r_ws, k, row0, st, pred=None, shuffled=False):
     """Load step ``st``'s weight operand of rows row0 .. +16 and its E8M0 byte (masked when not ``pred``)."""
     lane = c["lane"]
     j = lane // 16
     row = row0 + lane % 16
-    base = row * k + 128 * st + 16 * j
-    lo = fx.Vector(bo.buffer_load(r_w, base // 4, vec_width=4, dtype=T.i32))
-    hi = fx.Vector(bo.buffer_load(r_w, (base + 64) // 4, vec_width=4, dtype=T.i32))
+    col = 128 * st + 16 * j
+    lo_at, hi_at = w_offset(row, k, col, shuffled), w_offset(row, k, col + 64, shuffled)
+    lo = fx.Vector(bo.buffer_load(r_w, lo_at // 4, vec_width=4, dtype=T.i32))
+    hi = fx.Vector(bo.buffer_load(r_w, hi_at // 4, vec_width=4, dtype=T.i32))
     kg = k // 32
     wsi = (row0 // 32) * kg + st * 4 + j
     word = fx.Int32(bo.buffer_load(r_ws, wsi // 4, vec_width=1, dtype=T.i32))
@@ -48,9 +58,20 @@ def _step_load(c, r_w, r_ws, k, row0, st, pred=None):
 
 
 def gemv_loads(
-    c, w, ws, k, row0, split=None, tiled=False, kbeg=0, nsteps=None, pred=None
+    c,
+    w,
+    ws,
+    k,
+    row0,
+    split=None,
+    tiled=False,
+    kbeg=0,
+    nsteps=None,
+    pred=None,
+    shuffled=False,
 ):
-    """Issue this wave's weight loads for steps kbeg .. kbeg + nsteps."""
+    """Issue this wave's weight loads for steps kbeg .. kbeg + nsteps (``shuffled``:
+    the weight is in aiter's (16, 16) preshuffle)."""
     nsteps = k // 128 if nsteps is None else nsteps
     if const_expr(pred is None):
         r_w, r_ws = rsrc(w), rsrc(ws)
@@ -69,6 +90,7 @@ def gemv_loads(
             row0,
             kbeg + (st if live is None else fx.min(st, nsteps - 1)),
             pred,
+            shuffled,
         )
         for st, live in _steps(c, nsteps, split, tiled)
     ]
@@ -140,7 +162,7 @@ def chain_slots(c, nsteps, waves):
     return out
 
 
-def chain_loads(c, w, ws, k, row0, slots, pred):
+def chain_loads(c, w, ws, k, row0, slots, pred, shuffled=False):
     """Issue the weight loads of every step of ``slots`` (a dead step reads a zero-size buffer)."""
     out = []
     for _, steps in slots:
@@ -149,7 +171,13 @@ def chain_loads(c, w, ws, k, row0, slots, pred):
             nb = (live & pred).select(fx.Int64(0xFFFFFFFF), fx.Int64(0))
             ops.append(
                 _step_load(
-                    c, rsrc(w, nb), rsrc(ws, nb), k, row0, fx.min(st, k // 128 - 1)
+                    c,
+                    rsrc(w, nb),
+                    rsrc(ws, nb),
+                    k,
+                    row0,
+                    fx.min(st, k // 128 - 1),
+                    shuffled=shuffled,
                 )
             )
         out.append(ops)

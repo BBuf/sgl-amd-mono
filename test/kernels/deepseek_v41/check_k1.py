@@ -74,7 +74,7 @@ def rope_table(dev):
 
 def check_wqkv_route(M):
     """Return whether SGLang's wqkv_a config at M is the one K1 implements."""
-    from sglang.kernels.ops.quantization import mxfp8_native_amd_gfx95 as mx
+    from sglang.kernels.ops.gemm import mxfp8_native_amd_gfx95 as mx
 
     from sgl_amd_mono.deepseek_v41.gfx950.attention.plan import (
         wqkv_order,
@@ -123,18 +123,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--widths", default=WIDTHS)
     ap.add_argument("--trials", type=int, default=3)
+    # K1 reads wqkv and wq_b in aiter's (16, 16) preshuffle; the references keep row-major
+    ap.add_argument("--shuffled", action="store_true")
     args = ap.parse_args()
     rank, tp = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(rank)
     dev = torch.device("cuda", rank)
     dist.init_process_group("nccl")
     cpu = dist.new_group(backend="gloo")
-    from sglang.kernels.ops.attention.dsv4.elementwise import fused_k_norm_rope_flashmla
+    from sglang.kernels.ops.attention.dsv4.norm_rope import fused_k_norm_rope_flashmla
     from sglang.kernels.ops.layernorm.mhc_boundary_hip import (
         hc_boundary_fused_deferred,
         rmsnorm_with_sinkhorn,
     )
-    from sglang.kernels.ops.quantization.mxfp8_native_amd_gfx95 import (
+    from sglang.kernels.ops.gemm.mxfp8_native_amd_gfx95 import (
         mxfp8_native_blockscaled_linear,
         prepare_mxfp8_native_weight,
     )
@@ -158,6 +160,12 @@ def main():
     m.ffn_norm.copy_(
         (torch.randn(HIDDEN, generator=g, device=dev) * 1.5).exp().to(m.ffn_norm.dtype)
     )
+    if args.shuffled:
+        from aiter.ops.shuffle import shuffle_weight
+
+        kw = {n: shuffle_weight(a[n], (16, 16)) for n in ("wqkv", "wqb")}
+    else:
+        kw = {n: a[n] for n in ("wqkv", "wqb")}
     cos_sin = rope_table(dev)
     freqs = torch.complex(cos_sin[:, :32], cos_sin[:, 32:])  # SGLang's freqs_cis
     w_sh, w_su = prepare_mxfp8_native_weight(
@@ -197,7 +205,9 @@ def main():
     ]
     for M, (vname, fold, index, first) in runs:
         ok, route = check_wqkv_route(M)
-        k1 = build_mono_k1(MonoBuild(M, tp, fold=fold, index=index))
+        k1 = build_mono_k1(
+            MonoBuild(M, tp, fold=fold, index=index, shuffled=args.shuffled)
+        )
         lay = scratch_layout(M, tp)
         sc = r.scratch(M)
         static = [t.clone() for t in inputs(M)]
@@ -217,8 +227,8 @@ def main():
                 m.hc_ffn_fn.data_ptr(), m.hc_ffn_scale.data_ptr(), m.hc_ffn_base.data_ptr(),
                 m.ffn_norm.data_ptr(),
                 r.res_mid.data_ptr(), r.post_a.data_ptr(), r.comb_a.data_ptr(), r.pre_a.data_ptr(),
-                a["wqkv"].data_ptr(), a["wqkv_s"].data_ptr(), a["q_norm"].data_ptr(), a["kv_norm"].data_ptr(),
-                a["wqb"].data_ptr(), a["wqb_s"].data_ptr(), cos_sin.data_ptr(), pos.data_ptr(),
+                kw["wqkv"].data_ptr(), a["wqkv_s"].data_ptr(), a["q_norm"].data_ptr(), a["kv_norm"].data_ptr(),
+                kw["wqb"].data_ptr(), a["wqb_s"].data_ptr(), cos_sin.data_ptr(), pos.data_ptr(),
                 slot.data_ptr(), swa.data_ptr(), swa.stride(0), BLOCK, 0, 0, 0, 0, 0, 0, r.q.data_ptr(),
                 r.normed.data_ptr(), r.qr.data_ptr(), sc.data_ptr(),
                 r.peer.local, r.peer.addresses.data_ptr(), r.rank, r.epoch.data_ptr(),
