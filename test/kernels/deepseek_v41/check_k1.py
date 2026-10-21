@@ -132,13 +132,13 @@ def main():
     dist.init_process_group("nccl")
     cpu = dist.new_group(backend="gloo")
     from sglang.kernels.ops.attention.dsv4.norm_rope import fused_k_norm_rope_flashmla
-    from sglang.kernels.ops.layernorm.mhc_boundary_hip import (
-        hc_boundary_fused_deferred,
-        rmsnorm_with_sinkhorn,
-    )
     from sglang.kernels.ops.gemm.mxfp8_native_amd_gfx95 import (
         mxfp8_native_blockscaled_linear,
         prepare_mxfp8_native_weight,
+    )
+    from sglang.kernels.ops.layernorm.mhc_boundary_hip import (
+        hc_boundary_fused_deferred,
+        rmsnorm_with_sinkhorn,
     )
 
     from sgl_amd_mono.deepseek_v41.gfx950.layer import (
