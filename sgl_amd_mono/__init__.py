@@ -36,7 +36,7 @@ def register_specs() -> None:
     """The plugin entry point, which SGLang runs in every process."""
     try:
         from sglang.kernels.plugin_kernels.amd.spec import register
-    except ImportError:  # SGLang before sgl-project/sglang#45389
+    except ModuleNotFoundError:  # SGLang before sgl-project/sglang#45389
         from sglang.srt.monokernels.spec import register
 
     for architecture, path in SPECS.items():
