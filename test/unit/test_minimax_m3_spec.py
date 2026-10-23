@@ -12,11 +12,11 @@ import pytest
 import torch
 
 try:
-    from sglang.kernels.plugin_kernels.amd import spec as registry
+    from sglang.kernels.plugin_kernels.monokernel import spec as registry
 except ModuleNotFoundError:  # SGLang before sgl-project/sglang#45389
     from sglang.srt.monokernels import spec as registry
 try:
-    from sglang.srt.kernel_plugins.amd.binding import covered_capture_sizes
+    from sglang.srt.kernel_plugins.monokernel.binding import covered_capture_sizes
 except ModuleNotFoundError:  # SGLang before sgl-project/sglang#45389
     from sglang.srt.monokernels.guards import covered_capture_sizes
 

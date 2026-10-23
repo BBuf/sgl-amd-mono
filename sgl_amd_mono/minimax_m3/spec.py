@@ -22,7 +22,7 @@ import os
 import torch
 
 try:
-    from sglang.kernels.plugin_kernels.amd.spec import (
+    from sglang.kernels.plugin_kernels.monokernel.spec import (
         DeviceLimits,
         Feature,
         MonoSpec,
@@ -52,7 +52,7 @@ SHARED_WEIGHT = 1.0
 
 # by file under sglang/ (``f(p)``: a parameter, ``"x"``: a literal); test_contract.py pins them
 SGLANG_READS = {
-    "kernels/plugin_kernels/amd/spec.py|srt/monokernels/spec.py": (
+    "kernels/plugin_kernels/monokernel/spec.py|srt/monokernels/spec.py": (
         "MONOKERNEL_API_VERSION",
         "DeviceLimits",
         "Feature",
@@ -64,7 +64,7 @@ SGLANG_READS = {
         "tokens_per_request",
         "forward_mode",
     ),
-    "srt/kernel_plugins/amd/binding.py|srt/monokernels/runtime.py": (
+    "srt/kernel_plugins/monokernel/binding.py|srt/monokernels/runtime.py": (
         '"target_verify"',
     ),
     "srt/arg_groups/fields/*.py": (

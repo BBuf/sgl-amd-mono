@@ -2,7 +2,7 @@
 installed SGLang.
 
 The specs and kernels live outside SGLang, so they read SGLang by name: the
-monokernel framework (``sglang.kernels.plugin_kernels.amd``) and SGLang internals.
+monokernel framework (``sglang.kernels.plugin_kernels.monokernel``) and SGLang internals.
 Every module that imports from ``sglang`` lists what it reads in
 ``SGLANG_READS``. A refactor that renames one fails here, naming the file to
 repair, instead of failing at a GPU server's startup. The checks are static

@@ -2,7 +2,7 @@
 """Monokernels for SGLang on AMD Instinct GPUs (RFC sgl-project/sglang#43949).
 
 Persistent kernels run most of a decoder layer, its TP collectives included, in one
-or two launches. SGLang holds the interface (``sglang.kernels.plugin_kernels.amd``);
+or two launches. SGLang holds the interface (``sglang.kernels.plugin_kernels.monokernel``);
 this package holds the HIP device runtime (``common``) and, per model, its specs and
 their forwards (``<model>/spec.py``, ``<model>/draft.py``) and its kernels per ISA
 (``<model>/<isa>/``). SGLang loads it as a general plugin (the ``sglang.srt.plugins``
@@ -25,14 +25,14 @@ SPECS = {
 
 # The SGLang names this module reads (test/unit/test_contract.py pins them)
 SGLANG_READS = {
-    "kernels/plugin_kernels/amd/spec.py|srt/monokernels/spec.py": ("register",)
+    "kernels/plugin_kernels/monokernel/spec.py|srt/monokernels/spec.py": ("register",)
 }
 
 
 def register_specs() -> None:
     """The plugin entry point, which SGLang runs in every process."""
     try:
-        from sglang.kernels.plugin_kernels.amd.spec import register
+        from sglang.kernels.plugin_kernels.monokernel.spec import register
     except ModuleNotFoundError:  # SGLang before sgl-project/sglang#45389
         from sglang.srt.monokernels.spec import register
 

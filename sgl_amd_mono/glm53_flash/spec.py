@@ -35,7 +35,7 @@ import msgspec
 import torch
 
 try:
-    from sglang.kernels.plugin_kernels.amd.spec import (
+    from sglang.kernels.plugin_kernels.monokernel.spec import (
         DeviceLimits,
         MonoSpec,
         Numerics,
@@ -149,7 +149,7 @@ SGLANG_READS = {
         "lm_head",
         "forward(prev_topk_indices)",
     ),
-    "kernels/plugin_kernels/amd/spec.py|srt/monokernels/spec.py": (
+    "kernels/plugin_kernels/monokernel/spec.py|srt/monokernels/spec.py": (
         "DeviceLimits",
         "MonoSpec",
         "Numerics",

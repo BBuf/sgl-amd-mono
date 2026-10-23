@@ -18,7 +18,7 @@ import re
 import torch
 
 try:
-    from sglang.kernels.plugin_kernels.amd.spec import (
+    from sglang.kernels.plugin_kernels.monokernel.spec import (
         DeviceLimits,
         Feature,
         MonoSpec,
@@ -44,7 +44,7 @@ _CKPT_SHARED = re.compile(
 
 # by file under sglang/ (``f(p)``: a parameter, ``"x"``: a literal); test_contract.py pins them
 SGLANG_READS = {
-    "kernels/plugin_kernels/amd/spec.py|srt/monokernels/spec.py": (
+    "kernels/plugin_kernels/monokernel/spec.py|srt/monokernels/spec.py": (
         "DeviceLimits",
         "Feature",
         "MonoSpec",
